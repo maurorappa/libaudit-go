@@ -162,3 +162,35 @@ func GetAuditMessages(s Netlink, cb EventCallback, done *chan bool) {
 	}
 
 }
+
+func SendAuditMessagesToChannel(s Netlink, cb EventCallback, done *chan bool, msgCh chan AuditMessage) {
+        for {
+                select {
+                case <-*done:
+                        return
+                default:
+                        msgs, _ := s.Receive(false)
+                        for _, msg := range msgs {
+                                if msg.Header.Type == syscall.NLMSG_ERROR {
+                                        v := int32(hostEndian.Uint32(msg.Data[0:4]))
+                                        if v != 0 {
+                                                cb(nil, fmt.Errorf("audit error %d", v))
+                                        }
+                                } else {
+                                        nae, _ := NewAuditEvent(msg)
+                                        if nae == nil {
+                                                continue
+                                        }
+                                        //fmt.Printf("Command: %s, Exec: %s, Pid %s (ppid %s), Syscall: %s, Key: %s\n",nae.Data["comm"],nae.Data["exe"],nae.Data["pid"],nae.Data["ppid"],nae.Data["syscall"],nae.Data["key"])
+                                        fmt.Printf("Raw: %s\n",nae.Raw)
+                                        cmd_line := ""
+                                        args,_ := strconv.Atoi(nae.Data["argc"])
+                                        for i:=1; i<=args;i++ {
+                                                cmd_line = cmd_line + nae.Data["a"+strconv.Itoa(i)] + " "
+                                        }
+                                        msgCh <- AuditMessage{nae.Serial,nae.Data["exe"],cmd_line,nae.Data["euid"]}
+                                }
+                        }
+                }
+        }
+}
